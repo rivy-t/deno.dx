@@ -1,6 +1,8 @@
 import * as stdFs from "https://deno.land/std@0.108.0/fs/mod.ts";
 import {Command} from "https://deno.land/x/cliffy@v0.19.6/command/command.ts";
 
+import { dynamicImport } from 'https://cdn.jsdelivr.net/gh/ayoreis/import@7c0d89e/mod.ts';
+
 const taskfiles = ["Taskfile.ts", "Taskfile.js"]
 
 function detectTaskfile(): string | undefined {
@@ -22,59 +24,58 @@ function convertFileToUri(fileName: string) {
 }
 
 async function runScriptFile(fileName: string): Promise<void> {
-    await import((convertFileToUri(fileName)));
+	await dynamicImport(convertFileToUri(fileName));
 }
 
-function runTaskfile(taskfile: string, ...tasks: Array<string>) {
-    const fileUri = convertFileToUri(taskfile);
-    import(fileUri).then(module => {
-            if (tasks.length > 0) {
-                const runners = tasks.filter(task => {
-                    return task in module;
-                }).map(task => {
-                    console.log("===Task: " + task);
-                    // @ts-ignore correct
-                    return module[task]();
-                });
-                if (runners && runners.length > 0) {
-                    // @ts-ignore correct
-                    return Promise.all([...runners]);
-                } else {
-                    console.log(`No '${tasks.join(",")}' tasks found in ${taskfile}.`);
-                    Deno.exit(2);
-                }
-            } else {
-                if ("default" in module) {
-                    console.log("===Task: default");
-                    return module["default"]();
-                } else {
-                    //console.log("No default task found in Taskfile, please use 'export default xxx;' to add default task.")
-                    return command.parse(["-h"]);
-                }
-            }
-        }
-    );
+async function runTaskfile(taskfile: string, ...tasks: Array<string>) {
+	const fileUri = convertFileToUri(taskfile);
+	const module = await dynamicImport(fileUri);
+	if (tasks.length > 0) {
+		const runners = tasks
+			.filter((task) => {
+				return task in module;
+			})
+			.map((task) => {
+				console.log('===Task: ' + task);
+				// @ts-ignore correct
+				return module[task]();
+			});
+		if (runners && runners.length > 0) {
+			// @ts-ignore correct
+			return Promise.all([...runners]);
+		} else {
+			console.log(`No '${tasks.join(',')}' tasks found in ${taskfile}.`);
+			Deno.exit(2);
+		}
+	} else {
+		if ('default' in module) {
+			console.log('===Task: default');
+			return module['default']();
+		} else {
+			//console.log("No default task found in Taskfile, please use 'export default xxx;' to add default task.")
+			return command.parse(['-h']);
+		}
+	}
 }
 
 function printTasks() {
-    const taskfile = detectTaskfile();
-    if (taskfile) {
-        import(convertFileToUri(taskfile)).then(module => {
-            console.log("Available tasks:")
-            Object.entries(module).forEach(pair => {
-                if (pair[0] !== 'default' && typeof pair[1] === 'function') {
-                    const funObj = module[pair[0]];
-                    if ("desc" in funObj) {
-                        console.log(`  ${pair[0]} # ${funObj.desc}`);
-                    } else {
-                        console.log("  " + pair[0]);
-                    }
-                }
-            });
-        });
-    } else {
-        taskfileNotFound();
-    }
+	const taskfile = detectTaskfile();
+	if (taskfile) {
+		const module = dynamicImport(convertFileToUri(taskfile));
+		console.log('Available tasks:');
+		Object.entries(module).forEach((pair) => {
+			if (pair[0] !== 'default' && typeof pair[1] === 'function') {
+				const funObj = (module as unknown as { [key: string]: Function })[pair[0]];
+				if ('desc' in funObj) {
+					console.log(`  ${pair[0]} # ${funObj.desc}`);
+				} else {
+					console.log('  ' + pair[0]);
+				}
+			}
+		});
+	} else {
+		taskfileNotFound();
+	}
 }
 
 function generateShellCompletion(shell: string) {
